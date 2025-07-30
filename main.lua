@@ -2,6 +2,7 @@
     Hexagonal Grid & Advanced Map Generation Implementation Notes:
     - This version uses multi-octave Perlin noise for more detailed terrain.
     - It also uses a second noise map for "moisture" to create more varied biomes.
+    - Includes Combat, Health, Particles, and a Grappling Hook.
 --]]
 
 -- Hex Grid Constants (Pointy Top)
@@ -52,6 +53,7 @@ end
 PLAYER_COLLISION_W = 20; PLAYER_COLLISION_H = 24
 PLAYER_COLLISION_OX = 10; PLAYER_COLLISION_OY = 32
 
+-- Global tables
 buildingGrid = {}; placedBuildings = {}; placedObjects = {}; particles = {}; enemies = {}
 
 function isCollidingWithWorld(x, y)
@@ -97,7 +99,6 @@ function love.load()
         slime=love.graphics.newImage("slime.png"), hook=love.graphics.newImage("hook.png")
     }
 
-    -- World Gen...
     local seed = math.random(10000); noiseElevation = PerlinNoise.new(seed); noiseElevation.octaves = 8; noiseElevation.persistence = 0.5; noiseElevation.frequency = 0.02
     noiseMoisture = PerlinNoise.new(seed + 1); noiseMoisture.octaves = 6; noiseMoisture.persistence = 0.5; noiseMoisture.frequency = 0.02
     Biomes = { GRASSY = { color={0.2, 0.7, 0.2}, isPassable=true, treeChance=0.05, stoneChance=0.02}, FOREST = { color={0.1, 0.5, 0.1}, isPassable=true, treeChance=0.15, stoneChance=0.05}, DEEP_WATER = {color={0.1, 0.2, 0.4}, isPassable=false }, SHALLOW_WATER={color={0.2, 0.4, 0.8}, isPassable=false}, BEACH={color={0.9, 0.8, 0.5}, isPassable=true} }
@@ -108,6 +109,8 @@ function love.load()
             local e, m = (noiseElevation:get(q, r) + 1) / 2, (noiseMoisture:get(q, r) + 1) / 2
             local biome, tileKey = getBiome(e,m), q .. "," .. r
             map[tileKey] = { biome = biome, q = q, r = r }
+            if biome.treeChance and math.random() < biome.treeChance then local x,y=hex_to_pixel(q,r); table.insert(worldObjects, {type='tree',x=x,y=y,active=true}) end
+            if biome.stoneChance and math.random() < biome.stoneChance then local x,y=hex_to_pixel(q,r); local rT='rock'; if math.random()<0.3 then rT='iron_vein' end; table.insert(worldObjects, {type=rT,x=x,y=y,active=true}) end
         end
     end
 
@@ -137,11 +140,26 @@ end
 
 function love.keypressed(key)
     if key == "e" then
-        -- Gather logic...
+        local closestObj, closestDistSq = nil, (HEX_SIZE * 3)^2
+        for i, obj in ipairs(worldObjects) do
+            if obj.active then
+                for ox = -1, 1 do for oy = -1, 1 do
+                    local objX, objY = obj.x + ox * MAP_PIXEL_WIDTH, obj.y + oy * MAP_PIXEL_HEIGHT
+                    local distSq = (player.x - objX)^2 + (player.y - objY)^2
+                    if distSq < closestDistSq then closestDistSq, closestObj = distSq, obj end
+                end end
+            end
+        end
+        if closestObj then
+            local itemData = Items[closestObj.type]
+            player.inventory[itemData.drop] = (player.inventory[itemData.drop] or 0) + itemData.amount
+            spawnParticles(closestObj.x, closestObj.y, 10, itemData.particle_color)
+            closestObj.active = false
+        end
     end
     if key == "g" and player.inventory.grappling_hook > 0 and hook.state == 'ready' then
         hook.state = 'firing'; hook.x, hook.y = player.x, player.y
-        local mX, mY = camera:getMousePositionInWorld()
+        local mX, mY = love.mouse.getPosition(); mX, mY = mX + camera.x, mY + camera.y
         local angle = math.atan2(mY - player.y, mX - player.x)
         hook.vx, hook.vy = math.cos(angle) * hook.speed, math.sin(angle) * hook.speed
     end
@@ -154,21 +172,39 @@ function love.keypressed(key)
         if player.direction == 'down' then attackY = attackY + 30 end
         for i, enemy in ipairs(enemies) do
             if math.sqrt((enemy.x-attackX)^2 + (enemy.y-attackY)^2) < 40 then
-                enemy.health = enemy.health - 20 -- weapon damage
-                enemy.vx, enemy.vy = (enemy.x - player.x) * 2, (enemy.y - player.y) * 2 -- knockback
+                enemy.health = enemy.health - 20
+                enemy.vx, enemy.vy = (enemy.x - player.x) * 2, (enemy.y - player.y) * 2
             end
         end
     end
 end
 
-function love.mousepressed(x,y,button)
-    if button == 1 and hook.state == 'firing' then
-        -- This is where the grappling hook logic would go
-    end
-end
-
 function love.update(dt)
-    -- Player movement, animation, camera...
+    -- Player Movement
+    local moveX, moveY = 0, 0
+    if love.keyboard.isDown("a") or love.keyboard.isDown("left") then moveX, player.direction = -1, 'left' end
+    if love.keyboard.isDown("d") or love.keyboard.isDown("right") then moveX, player.direction = 1, 'right' end
+    if love.keyboard.isDown("w") or love.keyboard.isDown("up") then moveY, player.direction = -1, 'up' end
+    if love.keyboard.isDown("s") or love.keyboard.isDown("down") then moveY, player.direction = 1, 'down' end
+    local isMoving = (moveX ~= 0 or moveY ~= 0)
+    if isMoving then
+        local len = math.sqrt(moveX^2 + moveY^2); if len > 0 then moveX, moveY = moveX / len, moveY / len end
+        player.vx, player.vy = player.vx + moveX * player.acceleration * dt, player.vy + moveY * player.acceleration * dt
+    else
+        local speed = math.sqrt(player.vx^2 + player.vy^2)
+        if speed > player.friction * dt then local fx, fy = (player.vx/speed)*player.friction, (player.vy/speed)*player.friction; player.vx, player.vy = player.vx-fx*dt, player.vy-fy*dt else player.vx, player.vy = 0,0 end
+    end
+    local speed = math.sqrt(player.vx^2 + player.vy^2)
+    if speed > player.max_speed then player.vx, player.vy = (player.vx/speed)*player.max_speed, (player.vy/speed)*player.max_speed end
+    local nextX, nextY = player.x + player.vx * dt, player.y + player.vy * dt
+    if not isCollidingWithWorld(nextX, player.y) then player.x = nextX else player.vx = 0 end
+    if not isCollidingWithWorld(player.x, nextY) then player.y = nextY else player.vy = 0 end
+    player.anim = player.animations[player.direction]
+    if isMoving or player.vx ~= 0 or player.vy ~= 0 then player.anim:resume() else player.animations[player.direction]:gotoFrame(1); player.anim:pause() end
+    player.anim:update(dt)
+    camera.x, camera.y = player.x - love.graphics.getWidth()/2, player.y - love.graphics.getHeight()/2
+
+    -- Attack Timer
     if player.attack_timer > 0 then player.attack_timer = player.attack_timer - dt end
     
     -- Enemy AI
@@ -178,30 +214,26 @@ function love.update(dt)
             local dist = math.sqrt((player.x - e.x)^2 + (player.y - e.y)^2)
             if dist < 300 then
                 local angle = math.atan2(player.y - e.y, player.x - e.x)
-                e.vx = e.vx + math.cos(angle) * e.speed * dt * 20
-                e.vy = e.vy + math.sin(angle) * e.speed * dt * 20
+                e.vx, e.vy = e.vx + math.cos(angle) * e.speed * dt * 20, e.vy + math.sin(angle) * e.speed * dt * 20
             end
             local speed = math.sqrt(e.vx^2 + e.vy^2)
             if speed > e.speed then e.vx, e.vy = e.vx/speed * e.speed, e.vy/speed * e.speed end
             e.x, e.y = e.x + e.vx * dt, e.y + e.vy * dt
             if speed > 20 then e.vx, e.vy = e.vx * 0.9, e.vy * 0.9 end
-            if dist < 30 then player.health = player.health - e.damage * dt end
+            if dist < 30 then player.health = math.max(0, player.health - e.damage * dt) end
         end
     end
 
     -- Particle update
     for i=#particles,1,-1 do
-        local p = particles[i]
-        p.x, p.y = p.x + p.vx * dt, p.y + p.vy * dt
-        p.life = p.life - dt
-        if p.life <= 0 then table.remove(particles, i) end
+        local p = particles[i]; p.x, p.y = p.x + p.vx * dt, p.y + p.vy * dt
+        p.life = p.life - dt; if p.life <= 0 then table.remove(particles, i) end
     end
 end
 
 function love.draw()
     love.graphics.push(); love.graphics.translate(-camera.x, -camera.y)
     
-    -- World rendering...
     for offsetY = -2, 2 do
         for offsetX = -2, 2 do
             love.graphics.push(); love.graphics.translate(offsetX * MAP_PIXEL_WIDTH, offsetY * MAP_PIXEL_HEIGHT)
@@ -210,9 +242,7 @@ function love.draw()
                 love.graphics.push(); love.graphics.translate(x, y); love.graphics.polygon("fill", hex_vertices); love.graphics.pop()
             end
             love.graphics.setColor(1,1,1)
-            for i, obj in ipairs(worldObjects) do if obj.active then love.graphics.draw(Images[obj.type], obj.x, obj.y, 0, obj.scale or 1, obj.scale or 1, Images[obj.type]:getWidth()/2, Images[obj.type]:getHeight()/2) end end
-            for k, obj in pairs(builtObjects) do local x, y = hex_to_pixel(obj.q, obj.r); love.graphics.draw(Images.wall, x, y, 0, 1, 1, Images.wall:getWidth()/2, Images.wall:getHeight()/2) end
-            for i, obj in ipairs(placedObjects) do love.graphics.draw(Images[obj.type], obj.x, obj.y, 0, 1, 1, Images[obj.type]:getWidth()/2, Images[obj.type]:getHeight()/2) end
+            for i, obj in ipairs(worldObjects) do if obj.active then love.graphics.draw(Images[obj.type], obj.x, obj.y, 0, 1, 1, Images[obj.type]:getWidth()/2, Images[obj.type]:getHeight()/2) end end
             for i, e in ipairs(enemies) do love.graphics.draw(Images.slime, e.x, e.y, 0, 1, 1, Images.slime:getWidth()/2, Images.slime:getHeight()/2) end
             love.graphics.pop()
         end
@@ -220,7 +250,6 @@ function love.draw()
 
     love.graphics.setColor(1,1,1); player.anim:draw(Images.character_sheet, player.x, player.y, nil, nil, nil, 24, 40)
     
-    -- Particle drawing
     for i,p in ipairs(particles) do
         local alpha = (p.life / p.max_life)
         love.graphics.setColor(p.color[1], p.color[2], p.color[3], alpha)
@@ -229,17 +258,9 @@ function love.draw()
     
     love.graphics.pop()
 
-    -- UI Drawing
+    love.graphics.setColor(0.2,0.2,0.2,0.7); love.graphics.rectangle("fill", 5, 5, 210, 50)
     love.graphics.setColor(1,0,0); love.graphics.rectangle("fill", 10, 10, 200, 20)
     love.graphics.setColor(0,1,0); love.graphics.rectangle("fill", 10, 10, (player.health/player.maxHealth)*200, 20)
-    love.graphics.setColor(1,1,1); love.graphics.print("Health: "..math.floor(player.health), 15, 12)
-
-    love.graphics.print("Hunger: "..math.floor(player.hunger), 10, 40)
-    -- More UI text...
-end
-
--- Helper for mouse position
-function camera:getMousePositionInWorld()
-    local mX, mY = love.mouse.getPosition()
-    return mX + self.x, mY + self.y
+    love.graphics.setColor(1,1,1); love.graphics.print("Health", 15, 12)
+    love.graphics.print("Hunger: "..math.floor(player.hunger), 10, 35)
 end
