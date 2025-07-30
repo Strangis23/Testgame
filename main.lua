@@ -71,6 +71,7 @@ function isCollidingWithWorld(x, y)
 end
 
 function love.load()
+    love.window.setTitle("Hex Survival Evolved")
     anim8 = require 'anim8'
     PerlinNoise = require 'perlin'
     
@@ -157,100 +158,185 @@ function love.load()
         if tile.biome.stoneChance and math.random() < tile.biome.stoneChance then local rT = 'rock'; if math.random() < 0.3 then rT = 'iron_vein' end; table.insert(worldObjects, {type=rT, x=x, y=y, active=true, scale=scale, q=q, r=r}) end
     end
 
-    player = {x=spawnX, y=spawnY, speed=200, hunger=100, maxHunger=100, inventory={wood=0,stone=0,iron_ore=0,campfires=0,pickaxe=0,stone_wall=0}}
+    -- === SMOOTHER MOVEMENT (Part 1) ===
+    -- New physics variables for the player
+    player = {
+        x=spawnX, y=spawnY, hunger=100, maxHunger=100, 
+        inventory={wood=0,stone=0,iron_ore=0,campfires=0,pickaxe=0,stone_wall=0},
+        vx=0, vy=0, -- Velocity
+        max_speed=300,
+        acceleration=3000,
+        friction=2000
+    }
     local g = anim8.newGrid(48,48,Images.character_sheet:getWidth(),Images.character_sheet:getHeight())
     player.animations = {down=anim8.newAnimation(g('1-3',1),0.2), left=anim8.newAnimation(g('1-3',2),0.2), right=anim8.newAnimation(g('1-3',3),0.2), up=anim8.newAnimation(g('1-3',4),0.2)}; player.anim=player.animations.down; player.direction='down'
     camera = {x=0, y=0}; hungerTimer=0; hungerInterval=1.5;
 end
 
 function love.keypressed(key)
+    -- === SMARTER GATHERING ===
     if key == "e" then
-        local interactX, interactY; local playerCenterX, playerCenterY = player.x, player.y - 24
-        if player.direction == 'up' then interactX, interactY = playerCenterX, playerCenterY - 40
-        elseif player.direction == 'down' then interactX, interactY = playerCenterX, playerCenterY + 40
-        elseif player.direction == 'left' then interactX, interactY = playerCenterX - 40, playerCenterY
-        elseif player.direction == 'right' then interactX, interactY = playerCenterX + 40, playerCenterY end
+        local closestObj = nil
+        local closestDistSq = (HEX_SIZE * 2)^2 -- Max gather distance (squared for efficiency)
 
+        -- Find the closest active object to the player
         for i, obj in ipairs(worldObjects) do
-             if obj.active then
+            if obj.active then
                 for ox = -1, 1 do
                     for oy = -1, 1 do
                         local objX = obj.x + ox * MAP_PIXEL_WIDTH
                         local objY = obj.y + oy * MAP_PIXEL_HEIGHT
-                        if math.sqrt((interactX-objX)^2 + (interactY-objY)^2) < HEX_SIZE * (obj.scale or 1) then
-                           local itemData, yield = Items[obj.type], Items[obj.type].amount * (obj.scale or 1)
-                            if obj.type == 'tree' or obj.type == 'rock' then
-                                player.inventory[itemData.drop] = (player.inventory[itemData.drop] or 0) + yield
-                                obj.active = false
-                            elseif obj.type == 'iron_vein' then
-                                if player.inventory.pickaxe > 0 then
-                                    player.inventory[itemData.drop] = (player.inventory[itemData.drop] or 0) + yield
-                                    obj.active = false
-                                else print("You need a pickaxe to mine iron!") end
-                            end
-                            return
+                        local distSq = (player.x - objX)^2 + (player.y - objY)^2
+                        if distSq < closestDistSq then
+                            closestDistSq = distSq
+                            closestObj = obj
                         end
                     end
                 end
             end
         end
+
+        -- If a close-enough object was found, gather it
+        if closestObj then
+            local itemData, yield = Items[closestObj.type], Items[closestObj.type].amount * (closestObj.scale or 1)
+            if closestObj.type == 'tree' or closestObj.type == 'rock' then
+                player.inventory[itemData.drop] = (player.inventory[itemData.drop] or 0) + yield
+                closestObj.active = false
+            elseif closestObj.type == 'iron_vein' then
+                if player.inventory.pickaxe > 0 then
+                    player.inventory[itemData.drop] = (player.inventory[itemData.drop] or 0) + yield
+                    closestObj.active = false
+                else
+                    print("You need a pickaxe to mine iron!")
+                end
+            end
+        end
     end
 
+    if key == "1" then
+        local r = Items.pickaxe.recipe
+        if (player.inventory.wood or 0) >= r[1].amount and (player.inventory.stone or 0) >= r[2].amount then
+            player.inventory.wood = player.inventory.wood - r[1].amount
+            player.inventory.stone = player.inventory.stone - r[2].amount
+            player.inventory.pickaxe = (player.inventory.pickaxe or 0) + 1
+        end
+    end
+    if key == "2" then
+        local r = Items.stone_wall.recipe
+        if (player.inventory.stone or 0) >= r[1].amount then
+            player.inventory.stone = player.inventory.stone - r[1].amount
+            player.inventory.stone_wall = (player.inventory.stone_wall or 0) + 1
+        end
+    end
+    if key == "c" then
+        if (player.inventory.wood or 0) >= 4 then
+            player.inventory.wood = player.inventory.wood - 4
+            player.inventory.campfires = (player.inventory.campfires or 0) + 1
+        end
+    end
     if key == "f" then
         if (player.inventory.campfires or 0) >= 1 then
             player.inventory.campfires = player.inventory.campfires - 1
-            -- === THE FIX IS HERE (Campfires) ===
-            -- Place the campfire at the player's absolute, non-wrapped position
-            -- so it stays in the same spot relative to the player.
             table.insert(placedObjects, {type='campfire', x=player.x, y=player.y, timer=10})
-            print("Placed a campfire!")
         end
     end
-    -- Other crafting/building key presses omitted for brevity
+    if key == "b" then
+        if (player.inventory.stone_wall or 0) > 0 then
+            local pX = (player.x % MAP_PIXEL_WIDTH + MAP_PIXEL_WIDTH) % MAP_PIXEL_WIDTH
+            local pY = (player.y % MAP_PIXEL_HEIGHT + MAP_PIXEL_HEIGHT) % MAP_PIXEL_HEIGHT
+            local q, r = pixel_to_hex(pX, pY)
+            local k = q .. "," .. r
+            if not builtObjects[k] then
+                player.inventory.stone_wall = player.inventory.stone_wall - 1
+                builtObjects[k] = {type='wall', q=q, r=r}
+            end
+        end
+    end
 end
 
 function love.update(dt)
+    -- === SMOOTHER MOVEMENT (Part 2) ===
+    -- This new logic uses acceleration and friction for fluid movement.
+    
+    -- 1. Get movement direction from input
+    local moveX, moveY = 0, 0
+    if love.keyboard.isDown("a") or love.keyboard.isDown("left") then moveX = moveX - 1; player.direction='left' end
+    if love.keyboard.isDown("d") or love.keyboard.isDown("right") then moveX = moveX + 1; player.direction='right' end
+    if love.keyboard.isDown("w") or love.keyboard.isDown("up") then moveY = moveY - 1; player.direction='up' end
+    if love.keyboard.isDown("s") or love.keyboard.isDown("down") then moveY = moveY + 1; player.direction='down' end
+    
+    local isMoving = (moveX ~= 0 or moveY ~= 0)
+    
+    -- 2. Handle acceleration and friction
+    if isMoving then
+        -- Normalize diagonal movement to prevent faster speed
+        local len = math.sqrt(moveX^2 + moveY^2)
+        if len > 0 then moveX, moveY = moveX / len, moveY / len end
+
+        -- Accelerate the player
+        player.vx = player.vx + moveX * player.acceleration * dt
+        player.vy = player.vy + moveY * player.acceleration * dt
+    else
+        -- Apply friction if not moving
+        local current_speed = math.sqrt(player.vx^2 + player.vy^2)
+        if current_speed > player.friction * dt then
+            local friction_vx = (player.vx / current_speed) * player.friction
+            local friction_vy = (player.vy / current_speed) * player.friction
+            player.vx = player.vx - friction_vx * dt
+            player.vy = player.vy - friction_vy * dt
+        else
+            player.vx, player.vy = 0, 0
+        end
+    end
+
+    -- 3. Cap the player's speed
+    local current_speed = math.sqrt(player.vx^2 + player.vy^2)
+    if current_speed > player.max_speed then
+        player.vx = (player.vx / current_speed) * player.max_speed
+        player.vy = (player.vy / current_speed) * player.max_speed
+    end
+
+    -- 4. Apply velocity to position and check for collision
+    local nextX = player.x + player.vx * dt
+    local nextY = player.y + player.vy * dt
+    
+    if not isCollidingWithWorld(nextX, player.y) then
+        player.x = nextX
+    else
+        player.vx = 0 -- Stop horizontal movement on collision
+    end
+    
+    if not isCollidingWithWorld(player.x, nextY) then
+        player.y = nextY
+    else
+        player.vy = 0 -- Stop vertical movement on collision
+    end
+
+    -- 5. Update animations
+    player.anim = player.animations[player.direction]
+    if isMoving or player.vx ~= 0 or player.vy ~= 0 then player.anim:resume() else player.animations[player.direction]:gotoFrame(1); player.anim:pause() end
     player.anim:update(dt)
-    local dX, dY = 0, 0; local iM = false
-    if love.keyboard.isDown("s") or love.keyboard.isDown("down") then dY = player.speed*dt; player.direction='down'; iM=true end
-    if love.keyboard.isDown("w") or love.keyboard.isDown("up") then dY = -player.speed*dt; player.direction='up'; iM=true end
-    if love.keyboard.isDown("d") or love.keyboard.isDown("right") then dX = player.speed*dt; player.direction='right'; iM=true end
-    if love.keyboard.isDown("a") or love.keyboard.isDown("left") then dX = -player.speed*dt; player.direction='left'; iM=true end
 
-    local pX, pY = player.x + dX, player.y + dY
-
-    if dX ~= 0 then if not isCollidingWithWorld(pX, player.y) then player.x = pX end end
-    if dY ~= 0 then if not isCollidingWithWorld(player.x, pY) then player.y = pY end end
-
-    player.anim = player.animations[player.direction]; if iM then player.anim:resume() else player.animations[player.direction]:gotoFrame(1); player.anim:pause() end
+    -- 6. Update camera and hunger
     camera.x = player.x - love.graphics.getWidth()/2; camera.y = player.y - love.graphics.getHeight()/2
-
     hungerTimer = hungerTimer + dt; if hungerTimer >= hungerInterval then player.hunger = player.hunger - 1; hungerTimer = 0 end
     if player.hunger < 0 then player.hunger = 0 end
 
     for i = #placedObjects, 1, -1 do
         local obj = placedObjects[i]
         local oW, oH = Images.campfire:getDimensions()
-        
         local collided = false
         for ox = -1, 1 do
             for oy = -1, 1 do
-                local cX = player.x - PLAYER_COLLISION_OX
-                local cY = player.y - PLAYER_COLLISION_OY
-                local objX = obj.x + ox * MAP_PIXEL_WIDTH
-                local objY = obj.y + oy * MAP_PIXEL_HEIGHT
+                local cX = player.x - PLAYER_COLLISION_OX; local cY = player.y - PLAYER_COLLISION_OY
+                local objX = obj.x + ox * MAP_PIXEL_WIDTH; local objY = obj.y + oy * MAP_PIXEL_HEIGHT
                 if checkCollision(cX, cY, PLAYER_COLLISION_W, PLAYER_COLLISION_H, objX, objY, oW, oH) then
                     collided = true; break
                 end
             end
             if collided then break end
         end
-        
-        if collided then
-            player.hunger = player.hunger + (10*dt)
-            if player.hunger > player.maxHunger then player.hunger = player.maxHunger end
-        end
-
+        if collided then player.hunger = math.min(player.maxHunger, player.hunger + (10*dt)) end
         obj.timer = obj.timer - dt
         if obj.timer < 0 then table.remove(placedObjects, i) end
     end
@@ -260,30 +346,18 @@ function love.draw()
     love.graphics.push()
     love.graphics.translate(-camera.x, -camera.y)
 
-    for offsetX = -2, 2 do
-        for offsetY = -2, 2 do
+    for offsetY = -2, 2 do
+        for offsetX = -2, 2 do
             love.graphics.push()
             love.graphics.translate(offsetX * MAP_PIXEL_WIDTH, offsetY * MAP_PIXEL_HEIGHT)
             
-            -- Draw map tiles
-            local viewX = camera.x - offsetX * MAP_PIXEL_WIDTH
-            local viewY = camera.y - offsetY * MAP_PIXEL_HEIGHT
-            local viewW = love.graphics.getWidth()
-            local viewH = love.graphics.getHeight()
-
             for key, tile in pairs(map) do
                 local x, y = hex_to_pixel(tile.q, tile.r)
-                -- === THE FIX IS HERE (Black Tiles) ===
-                -- This culling logic correctly checks if a tile is inside the camera's view
-                -- for each of the world copies, preventing gaps.
-                if x + HEX_WIDTH > viewX - viewW/2 and x - HEX_WIDTH < viewX + viewW/2 and
-                   y + HEX_HEIGHT > viewY - viewH/2 and y - HEX_HEIGHT < viewY + viewH/2 then
-                    love.graphics.setColor(tile.biome.color)
-                    love.graphics.push()
-                    love.graphics.translate(x, y)
-                    love.graphics.polygon("fill", hex_vertices)
-                    love.graphics.pop()
-                end
+                love.graphics.setColor(tile.biome.color)
+                love.graphics.push()
+                love.graphics.translate(x, y)
+                love.graphics.polygon("fill", hex_vertices)
+                love.graphics.pop()
             end
             
             love.graphics.setColor(1, 1, 1)
@@ -296,12 +370,11 @@ function love.draw()
         end
     end
 
+    love.graphics.setColor(1, 1, 1)
     player.anim:draw(Images.character_sheet, player.x, player.y, nil, nil, nil, 24, 40)
 
     love.graphics.pop()
 
-    -- === THE FIX IS HERE (Missing UI) ===
-    -- Reset color and draw all UI elements on top of the world.
     love.graphics.setColor(1, 1, 1)
     love.graphics.print("Hunger: " .. math.floor(player.hunger), 10, 10)
     love.graphics.print("Wood: "..(player.inventory.wood or 0).." | Stone: "..(player.inventory.stone or 0).." | Iron: "..(player.inventory.iron_ore or 0), 10, 30)
