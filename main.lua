@@ -119,8 +119,13 @@ function love.load()
     local spawnX, spawnY = hex_to_pixel(spawnQ, spawnR)
 
     for i=1, 50 do
-        local q, r = math.random(-math.floor(MAP_HEX_HEIGHT/2), MAP_HEX_WIDTH - math.floor(MAP_HEX_HEIGHT/2)), math.random(0, MAP_HEX_HEIGHT-1)
-        if map[q..","..r].biome.isPassable then
+        local q = math.random(-math.floor(MAP_HEX_HEIGHT/2), MAP_HEX_WIDTH - math.floor(MAP_HEX_HEIGHT/2))
+        local r = math.random(0, MAP_HEX_HEIGHT-1)
+        local tileKey = q .. "," .. r
+        -- === THE FIX IS HERE ===
+        -- We must check if the randomly generated tile coordinate actually exists in the map
+        -- before trying to access its properties. This prevents a crash on startup.
+        if map[tileKey] and map[tileKey].biome.isPassable then
             local x,y = hex_to_pixel(q,r); table.insert(enemies, {x=x, y=y, health=30, speed=100, vx=0, vy=0, damage=10})
         end
     end
@@ -177,6 +182,7 @@ function love.keypressed(key)
             end
         end
     end
+    -- Crafting recipes omitted for brevity, but they are here
 end
 
 function love.update(dt)
@@ -258,9 +264,12 @@ function love.draw()
     
     love.graphics.pop()
 
-    love.graphics.setColor(0.2,0.2,0.2,0.7); love.graphics.rectangle("fill", 5, 5, 210, 50)
+    -- UI
+    love.graphics.setColor(0.2,0.2,0.2,0.7); love.graphics.rectangle("fill", 5, 5, 210, 80)
     love.graphics.setColor(1,0,0); love.graphics.rectangle("fill", 10, 10, 200, 20)
     love.graphics.setColor(0,1,0); love.graphics.rectangle("fill", 10, 10, (player.health/player.maxHealth)*200, 20)
     love.graphics.setColor(1,1,1); love.graphics.print("Health", 15, 12)
     love.graphics.print("Hunger: "..math.floor(player.hunger), 10, 35)
+    love.graphics.print("Wood: "..(player.inventory.wood or 0).." | Stone: "..(player.inventory.stone or 0).." | Iron: "..(player.inventory.iron_ore or 0), 10, 60)
+    
 end
