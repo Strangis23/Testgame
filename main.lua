@@ -164,18 +164,31 @@ end
 function love.update(dt)
     if gameState == 'paused' then return end
 
-    -- === THE FIX IS HERE ===
     -- Player Movement
     local moveX,moveY=0,0
     if joystick.active then
         local dx,dy=joystick.knobX-joystick.x,joystick.knobY-joystick.y; local len=math.sqrt(dx^2+dy^2)
         if len > joystick.knobRadius*0.2 then moveX,moveY=dx/len,dy/len end
     end
-    -- This section had incorrect syntax, which has now been fixed.
-    if love.keyboard.isDown("a") or love.keyboard.isDown("left") then moveX = -1; player.direction = 'left' end
-    if love.keyboard.isDown("d") or love.keyboard.isDown("right") then moveX = 1; player.direction = 'right' end
-    if love.keyboard.isDown("w") or love.keyboard.isDown("up") then moveY = -1; player.direction = 'up' end
-    if love.keyboard.isDown("s") or love.keyboard.isDown("down") then moveY = 1; player.direction = 'down' end
+    
+    -- === THE FIX IS HERE ===
+    -- This logic correctly handles keyboard input for smooth, responsive movement.
+    if love.keyboard.isDown("a") or love.keyboard.isDown("left") then
+        moveX = moveX - 1
+        player.direction = 'left'
+    end
+    if love.keyboard.isDown("d") or love.keyboard.isDown("right") then
+        moveX = moveX + 1
+        player.direction = 'right'
+    end
+    if love.keyboard.isDown("w") or love.keyboard.isDown("up") then
+        moveY = moveY - 1
+        player.direction = 'up'
+    end
+    if love.keyboard.isDown("s") or love.keyboard.isDown("down") then
+        moveY = moveY + 1
+        player.direction = 'down'
+    end
     
     local isMoving=(moveX~=0 or moveY~=0)
     if isMoving then local len=math.sqrt(moveX^2+moveY^2); if len>0 then moveX,moveY=moveX/len,moveY/len end; player.vx,player.vy=player.vx+moveX*player.acceleration*dt,player.vy+moveY*player.acceleration*dt
