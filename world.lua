@@ -12,23 +12,40 @@ function World.load()
     local noiseElevation = PerlinNoise.new(seed); noiseElevation.octaves=8; noiseElevation.persistence=0.5; noiseElevation.frequency=0.02
     local noiseMoisture = PerlinNoise.new(seed+1); noiseMoisture.octaves=6; noiseMoisture.persistence=0.5; noiseMoisture.frequency=0.02
     
-    local Biomes = { GRASSY={color={0.2,0.7,0.2},passable=true,treeChance=0.05,stoneChance=0.02}, FOREST={color={0.1,0.5,0.1},passable=true,treeChance=0.15,stoneChance=0.05}, DEEP_WATER={color={0.1,0.2,0.4},passable=false}, SHALLOW_WATER={color={0.2,0.4,0.8},passable=false}, BEACH={color={0.9,0.8,0.5},passable=true} }
+    -- === THE FIX IS HERE ===
+    -- Biomes now define the specific resources and enemies that can spawn in them.
+    Biomes = {
+        DEEP_WATER = {color={0.1,0.2,0.4}, passable=false},
+        SHALLOW_WATER = {color={0.2,0.4,0.8}, passable=false},
+        BEACH = {color={0.9,0.8,0.5}, passable=true, resources={{type='rock', chance=0.01}}},
+        GRASSY = {color={0.2,0.7,0.2}, passable=true,
+            resources = {{type='tree', chance=0.02}, {type='rock', chance=0.01}},
+            enemies = {{type='slime', chance=0.01}}
+        },
+        FOREST = {color={0.1,0.5,0.1}, passable=true,
+            resources = {{type='tree', chance=0.15}, {type='rock', chance=0.05}, {type='iron_vein', chance=0.02}},
+            enemies = {{type='slime', chance=0.03}}
+        }
+    }
+
     local function getBiome(e,m) if e<0.3 then return Biomes.DEEP_WATER end; if e<0.4 then return Biomes.SHALLOW_WATER end; if e<0.45 then return Biomes.BEACH end; if m<0.5 then return Biomes.GRASSY else return Biomes.FOREST end end
     
     map, builtObjects = {}, {}
+    -- The generation loop now handles spawning based on the biome's rules.
     for r=0,MAP_HEX_HEIGHT-1 do for q=-math.floor(r/2),MAP_HEX_WIDTH-math.floor(r/2)-1 do
-        local e,m = (noiseElevation:get(q,r)+1)/2, (noiseMoisture:get(q,r)+1)/2; local biome,tileKey = getBiome(e,m), q..","..r
+        local e,m = (noiseElevation:get(q,r)+1)/2, (noiseMoisture:get(q,r)+1)/2;
+        local biome,tileKey = getBiome(e,m), q..","..r
         map[tileKey] = {biome=biome, q=q, r=r}
+
         if biome.passable then
-            if biome.treeChance and math.random()<biome.treeChance then Entities.addResource('tree', q, r) end
-            if biome.stoneChance and math.random()<biome.stoneChance then local rType = math.random()<0.3 and 'iron_vein' or 'rock'; Entities.addResource(rType, q, r) end
+            if biome.resources then for _,res in ipairs(biome.resources) do
+                if math.random() < res.chance then Entities.addResource(res.type, q, r) end
+            end end
+            if biome.enemies then for _,enemy in ipairs(biome.enemies) do
+                if math.random() < enemy.chance then Entities.addEnemy(enemy.type, q, r) end
+            end end
         end
     end end
-    
-    for i=1,50 do 
-        local q,r = math.random(-math.floor(MAP_HEX_HEIGHT/2), MAP_HEX_WIDTH-math.floor(MAP_HEX_HEIGHT/2)), math.random(0, MAP_HEX_HEIGHT-1)
-        if map[q..","..r] and map[q..","..r].biome.passable then Entities.addEnemy(q,r) end
-    end
 end
 
 function World.draw()

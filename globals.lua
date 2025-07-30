@@ -10,13 +10,15 @@ PLAYER_COLLISION_W = 20; PLAYER_COLLISION_H = 24
 PLAYER_COLLISION_OX = 10; PLAYER_COLLISION_OY = 32
 
 -- Initialize Global Tables
-Items = {}
-Images = {}
-player = {}
-camera = {}
-map = {}
+Items, Images, player, camera, map = {}, {}, {}, {}, {}
 worldObjects, builtObjects, placedObjects, enemies, particles = {}, {}, {}, {}, {}
 gameState = 'playing'
+
+-- === NEW FEATURE ===
+-- This table holds the stats for all enemy types.
+EnemyTypes = {
+    slime = { health = 30, speed = 80, damage = 10 }
+}
 
 -- Load Assets and Definitions
 function LoadGlobals()

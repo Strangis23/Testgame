@@ -9,9 +9,9 @@ function Entities.load()
 end
 
 function Entities.update(dt)
-    -- Enemy AI
-    for i=#enemies,1,-1 do local e=enemies[i]; if e.health<=0 then table.remove(enemies,i) else local dist=math.sqrt((player.x-e.x)^2+(player.y-e.y)^2); if dist<300 then local angle=math.atan2(player.y-e.y,player.x-e.x); e.vx,e.vy=e.vx+math.cos(angle)*e.speed*dt*20,e.vy+math.sin(angle)*e.speed*dt*20 end; local speed=math.sqrt(e.vx^2+e.vy^2); if speed>e.speed then e.vx,e.vy=e.vx/speed*e.speed,e.vy/speed*e.speed end; e.x,e.y=e.x+e.vx*dt,e.y+e.vy*dt; if speed>20 then e.vx,e.vy=e.vx*0.9,e.vy*0.9 end; if dist<30 then player.health=math.max(0,player.health-e.damage*dt) end end end
-    -- Particles
+    -- Enemy AI (remains the same)
+    for i=#enemies,1,-1 do local e=enemies[i]; if e.health<=0 then table.remove(enemies,i) else local dist=math.sqrt((player.x-e.x)^2+(player.y-e.y)^2); if dist<300 then local angle=math.atan2(player.y-e.y,player.x-e.x); e.vx,e.vy=e.vx+math.cos(angle)*e.speed*dt*20,e.vy+math.sin(angle)*e.speed*dt*20 end; local speed=math.sqrt(e.vx^2+e.vy^2); if speed>e.speed then e.vx,e.vy=e.vx/speed*e.speed,e.vy/speed*e.speed end; e.x,e.y=e.x+e.vx*dt,e.vy*dt; if speed>20 then e.vx,e.vy=e.vx*0.9,e.vy*0.9 end; if dist<30 then player.health=math.max(0,player.health-e.damage*dt) end end end
+    -- Particles (remains the same)
     for i=#particles,1,-1 do local p=particles[i]; p.x,p.y=p.x+p.vx*dt,p.y+p.vy*dt; p.life=p.life-dt; if p.life<=0 then table.remove(particles,i) end end
 end
 
@@ -28,7 +28,7 @@ function Entities.drawWorldObjects()
         love.graphics.push(); love.graphics.translate(offsetX*MAP_PIXEL_WIDTH,offsetY*MAP_PIXEL_HEIGHT)
         love.graphics.setColor(1,1,1)
         for _,obj in ipairs(worldObjects) do if obj.active then love.graphics.draw(Images[obj.type],obj.x,obj.y,0,1,1,Images[obj.type]:getWidth()/2,Images[obj.type]:getHeight()/2) end end
-        for _,e in ipairs(enemies) do love.graphics.draw(Images.slime,e.x,e.y,0,1,1,Images.slime:getWidth()/2,Images.slime:getHeight()/2) end
+        for _,e in ipairs(enemies) do love.graphics.draw(Images[e.type],e.x,e.y,0,1,1,Images[e.type]:getWidth()/2,Images[e.type]:getHeight()/2) end
         for k,obj in pairs(builtObjects) do local x,y=Utils.hex_to_pixel(obj.q,obj.r); love.graphics.draw(Images[obj.type],x,y,0,1,1,Images[obj.type]:getWidth()/2,Images[obj.type]:getHeight()/2) end
         for _,obj in ipairs(placedObjects) do love.graphics.draw(Images[obj.type],obj.x,obj.y,0,1,1,Images[obj.type]:getWidth()/2,Images[obj.type]:getHeight()/2) end
         love.graphics.pop()
@@ -40,9 +40,16 @@ function Entities.addResource(type, q, r)
     table.insert(worldObjects, {type=type, x=x, y=y, active=true})
 end
 
-function Entities.addEnemy(q,r)
+-- === THE FIX IS HERE ===
+-- This function now takes an enemy 'type' to spawn the correct kind of enemy.
+function Entities.addEnemy(type, q, r)
     local x,y = Utils.hex_to_pixel(q,r)
-    table.insert(enemies, {x=x,y=y,health=30,speed=100,vx=0,vy=0,damage=10})
+    local data = EnemyTypes[type]
+    table.insert(enemies, {
+        type = type, x = x, y = y,
+        health = data.health, speed = data.speed, damage = data.damage,
+        vx=0, vy=0
+    })
 end
 
 function Entities.gatherClosest()

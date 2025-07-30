@@ -58,7 +58,9 @@ function Player.draw()
         local equippedItemName = player.hotbar[player.selected_slot]
         if equippedItemName and Items[equippedItemName] and Items[equippedItemName].is_weapon then
             local wepImg = Images[equippedItemName]
-            love.graphics.draw(wepImg, player.x, player.y, math.rad(player.attack_angle), 1, 1, wepImg:getWidth()/2, 0)
+            -- === THE FIX IS HERE ===
+            -- Changed the origin point (oy) to the bottom of the image for a better pivot.
+            love.graphics.draw(wepImg, player.x, player.y, math.rad(player.attack_angle), 1, 1, wepImg:getWidth()/2, wepImg:getHeight())
         end
     end
 end
