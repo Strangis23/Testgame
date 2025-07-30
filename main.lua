@@ -199,9 +199,10 @@ function love.keypressed(key)
     if key == "f" then
         if (player.inventory.campfires or 0) >= 1 then
             player.inventory.campfires = player.inventory.campfires - 1
-            local placeX = (player.x % MAP_PIXEL_WIDTH + MAP_PIXEL_WIDTH) % MAP_PIXEL_WIDTH
-            local placeY = (player.y % MAP_PIXEL_HEIGHT + MAP_PIXEL_HEIGHT) % MAP_PIXEL_HEIGHT
-            table.insert(placedObjects, {type='campfire', x=placeX, y=placeY, timer=10})
+            -- === THE FIX IS HERE (Campfires) ===
+            -- Place the campfire at the player's absolute, non-wrapped position
+            -- so it stays in the same spot relative to the player.
+            table.insert(placedObjects, {type='campfire', x=player.x, y=player.y, timer=10})
             print("Placed a campfire!")
         end
     end
@@ -256,8 +257,6 @@ function love.update(dt)
 end
 
 function love.draw()
-    -- === THE FIX IS HERE ===
-    -- This drawing logic correctly handles the smooth, seamless camera and object wrapping.
     love.graphics.push()
     love.graphics.translate(-camera.x, -camera.y)
 
@@ -267,13 +266,18 @@ function love.draw()
             love.graphics.translate(offsetX * MAP_PIXEL_WIDTH, offsetY * MAP_PIXEL_HEIGHT)
             
             -- Draw map tiles
+            local viewX = camera.x - offsetX * MAP_PIXEL_WIDTH
+            local viewY = camera.y - offsetY * MAP_PIXEL_HEIGHT
+            local viewW = love.graphics.getWidth()
+            local viewH = love.graphics.getHeight()
+
             for key, tile in pairs(map) do
                 local x, y = hex_to_pixel(tile.q, tile.r)
-                -- Simple culling to only draw tiles roughly on screen
-                local drawX = x + offsetX * MAP_PIXEL_WIDTH
-                local drawY = y + offsetY * MAP_PIXEL_HEIGHT
-                 if drawX > camera.x - love.graphics.getWidth() and drawX < camera.x + love.graphics.getWidth() and
-                    drawY > camera.y - love.graphics.getHeight() and drawY < camera.y + love.graphics.getHeight() then
+                -- === THE FIX IS HERE (Black Tiles) ===
+                -- This culling logic correctly checks if a tile is inside the camera's view
+                -- for each of the world copies, preventing gaps.
+                if x + HEX_WIDTH > viewX - viewW/2 and x - HEX_WIDTH < viewX + viewW/2 and
+                   y + HEX_HEIGHT > viewY - viewH/2 and y - HEX_HEIGHT < viewY + viewH/2 then
                     love.graphics.setColor(tile.biome.color)
                     love.graphics.push()
                     love.graphics.translate(x, y)
@@ -282,10 +286,8 @@ function love.draw()
                 end
             end
             
-            -- Reset color to white before drawing textured objects
             love.graphics.setColor(1, 1, 1)
 
-            -- Draw all static objects. They will appear in each world copy.
             for i, obj in ipairs(worldObjects) do if obj.active then love.graphics.draw(Images[obj.type], obj.x, obj.y, 0, obj.scale or 1, obj.scale or 1, Images[obj.type]:getWidth()/2, Images[obj.type]:getHeight()/2) end end
             for k, obj in pairs(builtObjects) do local x, y = hex_to_pixel(obj.q, obj.r); love.graphics.draw(Images.wall, x, y, 0, 1, 1, Images.wall:getWidth()/2, Images.wall:getHeight()/2) end
             for i, obj in ipairs(placedObjects) do love.graphics.draw(Images[obj.type], obj.x, obj.y, 0, 1, 1, Images[obj.type]:getWidth()/2, Images[obj.type]:getHeight()/2) end
@@ -294,14 +296,18 @@ function love.draw()
         end
     end
 
-    -- Draw the player once, at their absolute position
     player.anim:draw(Images.character_sheet, player.x, player.y, nil, nil, nil, 24, 40)
 
     love.graphics.pop()
 
-    -- UI
+    -- === THE FIX IS HERE (Missing UI) ===
+    -- Reset color and draw all UI elements on top of the world.
     love.graphics.setColor(1, 1, 1)
     love.graphics.print("Hunger: " .. math.floor(player.hunger), 10, 10)
     love.graphics.print("Wood: "..(player.inventory.wood or 0).." | Stone: "..(player.inventory.stone or 0).." | Iron: "..(player.inventory.iron_ore or 0), 10, 30)
     love.graphics.print("Pickaxes: "..(player.inventory.pickaxe or 0).." | Walls: "..(player.inventory.stone_wall or 0).." | Campfires: "..(player.inventory.campfires or 0), 10, 50)
+    local c1 = "[E] Gather | [B] Build Wall | [F] Place Campfire"
+    local c2 = "[1] Craft Pickaxe | [2] Craft Wall | [C] Craft Campfire"
+    love.graphics.print(c1, 10, love.graphics.getHeight()-40)
+    love.graphics.print(c2, 10, love.graphics.getHeight()-20)
 end
