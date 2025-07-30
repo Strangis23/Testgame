@@ -171,7 +171,6 @@ function love.keypressed(key)
         elseif player.direction == 'left' then interactX, interactY = playerCenterX - 40, playerCenterY
         elseif player.direction == 'right' then interactX, interactY = playerCenterX + 40, playerCenterY end
 
-        -- The interaction point does not need to be wrapped because the objects are drawn in all 9 locations
         for i, obj in ipairs(worldObjects) do
              if obj.active then
                 for ox = -1, 1 do
@@ -189,7 +188,7 @@ function love.keypressed(key)
                                     obj.active = false
                                 else print("You need a pickaxe to mine iron!") end
                             end
-                            return -- Exit after finding the object
+                            return
                         end
                     end
                 end
@@ -197,17 +196,16 @@ function love.keypressed(key)
         end
     end
 
-    -- (Crafting and other key presses remain the same)
     if key == "f" then
         if (player.inventory.campfires or 0) >= 1 then
             player.inventory.campfires = player.inventory.campfires - 1
-            -- Place the campfire relative to the player's wrapped position
             local placeX = (player.x % MAP_PIXEL_WIDTH + MAP_PIXEL_WIDTH) % MAP_PIXEL_WIDTH
             local placeY = (player.y % MAP_PIXEL_HEIGHT + MAP_PIXEL_HEIGHT) % MAP_PIXEL_HEIGHT
             table.insert(placedObjects, {type='campfire', x=placeX, y=placeY, timer=10})
             print("Placed a campfire!")
         end
     end
+    -- Other crafting/building key presses omitted for brevity
 end
 
 function love.update(dt)
@@ -223,10 +221,6 @@ function love.update(dt)
     if dX ~= 0 then if not isCollidingWithWorld(pX, player.y) then player.x = pX end end
     if dY ~= 0 then if not isCollidingWithWorld(player.x, pY) then player.y = pY end end
 
-    -- === THE FIX IS HERE (Part 1) ===
-    -- The player's coordinates are NO LONGER wrapped. This allows for a smooth camera.
-    -- The drawing function will handle the visual wrapping.
-
     player.anim = player.animations[player.direction]; if iM then player.anim:resume() else player.animations[player.direction]:gotoFrame(1); player.anim:pause() end
     camera.x = player.x - love.graphics.getWidth()/2; camera.y = player.y - love.graphics.getHeight()/2
 
@@ -237,8 +231,6 @@ function love.update(dt)
         local obj = placedObjects[i]
         local oW, oH = Images.campfire:getDimensions()
         
-        -- === THE FIX IS HERE (Part 2) ===
-        -- Check for collision in a 3x3 grid to handle interaction across the wrap-around seam.
         local collided = false
         for ox = -1, 1 do
             for oy = -1, 1 do
@@ -264,20 +256,24 @@ function love.update(dt)
 end
 
 function love.draw()
-    -- === THE FIX IS HERE (Part 3) ===
-    -- The drawing loop handles the visual wrapping. By letting the player's
-    -- coordinates grow, the camera moves smoothly with them.
+    -- === THE FIX IS HERE ===
+    -- This drawing logic correctly handles the smooth, seamless camera and object wrapping.
+    love.graphics.push()
+    love.graphics.translate(-camera.x, -camera.y)
+
     for offsetX = -2, 2 do
         for offsetY = -2, 2 do
             love.graphics.push()
             love.graphics.translate(offsetX * MAP_PIXEL_WIDTH, offsetY * MAP_PIXEL_HEIGHT)
             
-            -- All static map elements are drawn here, relative to the current world copy
+            -- Draw map tiles
             for key, tile in pairs(map) do
                 local x, y = hex_to_pixel(tile.q, tile.r)
                 -- Simple culling to only draw tiles roughly on screen
-                 if x > camera.x - love.graphics.getWidth() and x < camera.x + love.graphics.getWidth()*2 and
-                    y > camera.y - love.graphics.getHeight() and y < camera.y + love.graphics.getHeight()*2 then
+                local drawX = x + offsetX * MAP_PIXEL_WIDTH
+                local drawY = y + offsetY * MAP_PIXEL_HEIGHT
+                 if drawX > camera.x - love.graphics.getWidth() and drawX < camera.x + love.graphics.getWidth() and
+                    drawY > camera.y - love.graphics.getHeight() and drawY < camera.y + love.graphics.getHeight() then
                     love.graphics.setColor(tile.biome.color)
                     love.graphics.push()
                     love.graphics.translate(x, y)
@@ -286,18 +282,21 @@ function love.draw()
                 end
             end
             
+            -- Reset color to white before drawing textured objects
+            love.graphics.setColor(1, 1, 1)
+
+            -- Draw all static objects. They will appear in each world copy.
             for i, obj in ipairs(worldObjects) do if obj.active then love.graphics.draw(Images[obj.type], obj.x, obj.y, 0, obj.scale or 1, obj.scale or 1, Images[obj.type]:getWidth()/2, Images[obj.type]:getHeight()/2) end end
             for k, obj in pairs(builtObjects) do local x, y = hex_to_pixel(obj.q, obj.r); love.graphics.draw(Images.wall, x, y, 0, 1, 1, Images.wall:getWidth()/2, Images.wall:getHeight()/2) end
             for i, obj in ipairs(placedObjects) do love.graphics.draw(Images[obj.type], obj.x, obj.y, 0, 1, 1, Images[obj.type]:getWidth()/2, Images[obj.type]:getHeight()/2) end
-
+            
             love.graphics.pop()
         end
     end
 
-    -- The camera and player are drawn once, after all the world copies are laid down.
-    love.graphics.push()
-    love.graphics.translate(-camera.x, -camera.y)
+    -- Draw the player once, at their absolute position
     player.anim:draw(Images.character_sheet, player.x, player.y, nil, nil, nil, 24, 40)
+
     love.graphics.pop()
 
     -- UI
